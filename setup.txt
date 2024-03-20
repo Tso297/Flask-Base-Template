@@ -9,12 +9,17 @@ the terminal cmd is this: python -m venv WhateverYouWantToCallIt
 to tap into it, you activate it by WhateverYouWantToCallIt\Scripts\activate
 
 You should now be tapped into your venv!
+
 Make sure you fill in .env variables
+
 Your next move is your pip installs on your terminal:
 pip install flask python-dotenv flask-migrate flask-sqlalchemy flask-cors psycopg2 gunicorn
 
 Once install do pip freeze > requirements.txt
+
 Any time you do a pip install, this should be your next move to get it into your package
+
+Change Python 3.12 in bottom corner to your my_venv terminal!
 
 Write out models.py
 
