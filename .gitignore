@@ -1,3 +1,4 @@
 my_venv
 .env
-requirements.txt
+__pycache__
+migrations

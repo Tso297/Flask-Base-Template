@@ -6,9 +6,9 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 app.config.from_object(Config)
-db = SQLAlchemy(app)
-migrate = Migrate(app,db)
-cors = CORS(app)
+db = SQLAlchemy(app) #only if using a DB
+migrate = Migrate(app,db)# only if using a DB
+cors = CORS(app)# only if you plan to connect this elsewhere unless this is 100% flask oriented within itself.
 
 from . import models
 
