@@ -23,7 +23,7 @@ Write out models.py
 
 Choose a website and setup your database (for our instances elephantsql or sqllite)
 
-Then do flask db init (initialize is a one time only) and then flask db migrate and flask dbupgrade (think of this as doing your git commit and git push respectively.
+Then do flask db init (initialize is a one time only) and then flask db migrate and flask dbupgrade (think of this as doing your git commit and git push respectively.)
 (ANY TIME YOU USE MODELS THIS IS HIGHLY RECOMMENDED TO DO)
 
 So in a nutshell this is the !cdbn5 bootstrap of flask... Sort of.
@@ -34,7 +34,7 @@ my_venv (or whatever you call your venv)
 __pycache__
 migrations
 
-Start writing your routes and your models, and be mindful of your file organization AS YOU GO so you dont have to reorganize later or have to do so minimally.
+Start writing your routes and your models, and be mindful of your file organization AS YOU GO so you don't have to reorganize later or have to do so minimally.
 
 (Models is required if you have a database)
 (Blueprints are not required and can be plugged directly in the py file necessary)
