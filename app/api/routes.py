@@ -1,7 +1,8 @@
 from app import db
 from flask import request, jsonify
-from app.models import User, Orders, user_schema, users_schema, order_schema, orders_schema
+from app.models import User, Carts, user_schema, users_schema, cart_schema, carts_schema
 from . import api
+from datetime import datetime, timezone
 
 
 ###################################################
@@ -9,10 +10,9 @@ from . import api
 def create_user():
     username = request.json['username']
     email = request.json['email']
-    phone_number = request.json['phone_number']
     password = request.json['password']
 
-    user = User(username, email, phone_number, password)
+    user = User(username, email, password)
 
     db.session.add(user)
     db.session.commit()
@@ -20,20 +20,24 @@ def create_user():
     response = user_schema.dump(user)
     return jsonify(response)
 ###################################################
-@api.route('/orders', methods = ['POST'])
-def create_order():
-    user_id = request.json['user_id']
-    item_size = request.json['item_size']
-    shipping_address = request.json['shipping_address']
-    custom_blend = request.json['custom_blend']
+@api.route('/checkout', methods = ['POST'])
+def create_cart():
+    custom_blend = []
+    for blend in request.json:
+        custom_blend.append(blend)
 
+    totalPrice = 0
+    for i in range(len(custom_blend)):
+        totalPrice += custom_blend[i]["totalPrice"]
+        totalPrice = round(totalPrice, 2)
 
-    order = Orders(user_id, item_size, shipping_address, custom_blend)
+    
+    cart = Carts(custom_blend, totalPrice)
 
-    db.session.add(order)
+    db.session.add(Carts(custom_blend=custom_blend, totalPrice=totalPrice))
     db.session.commit()
 
-    response = order_schema.dump(order)
+    response = cart_schema.dump(cart)
     return jsonify(response)
 ####################################################
 @api.route('/users', methods = ['GET'])
@@ -48,16 +52,16 @@ def get_single_contact(id):
     response = user_schema.dump(user)
     return jsonify(response)
 ####################################################
-@api.route('/orders', methods = ['GET'])
-def get_orders():
-    orders = Orders.query.all()
-    response = orders_schema.dump(orders)
+@api.route('/carts', methods = ['GET'])
+def get_carts():
+    carts = Carts.query.all()
+    response = carts_schema.dump(carts)
     return jsonify(response)
 ####################################################
-@api.route('/orders/<id>', methods = ['GET'])
-def get_single_order(id):
-    order = Orders.query.get(id)
-    response = order_schema.dump(order)
+@api.route('/carts/<id>', methods = ['GET'])
+def get_single_cart(id):
+    cart = Carts.query.get(id)
+    response = cart_schema.dump(cart)
     return jsonify(response)
 #####################################################
 @api.route('/users/<id>', methods = ['POST', 'PUT'])
@@ -65,23 +69,22 @@ def update_user(id):
     user = User.query.get(id)
     user.username = request.json['username']
     user.email = request.json['email']
-    user.phone_number = request.json['phone_number']
     user.password = request.json['password']
 
     db.session.commit()
     response = user_schema.dump(user)
     return jsonify(response)
 #####################################################
-@api.route('/orders/<id>', methods = ['POST', 'PUT'])
-def update_order(id):
-    order = Orders.query.get(id)
-    order.user_id = request.json['user_id']
-    order.item_size = request.json['item_size']
-    order.shipping_address = request.json['shipping_address']
-    order.custom_blend = request.json['custom_blend']
+@api.route('/carts/<id>', methods = ['POST', 'PUT'])
+def update_cart(id):
+    cart = Carts.query.get(id)
+    cart.user_id = request.json['user_id']
+    cart.item_size = request.json['item_size']
+    cart.shipping_address = request.json['shipping_address']
+    cart.custom_blend = request.json['custom_blend']
 
     db.session.commit()
-    response = order_schema.dump(order)
+    response = cart_schema.dump(cart)
     return jsonify(response)
 ######################################################
 @api.route('/users/<id>', methods = ['DELETE'])
@@ -92,11 +95,10 @@ def delete_user(id):
     response = user_schema.dump(user)
     return jsonify(response)
 #######################################################
-@api.route('/orders/<id>', methods = ['DELETE'])
-def delete_order(id):
-    order = Orders.query.get(id)
-    db.session.delete(order)
+@api.route('/carts/<id>', methods = ['DELETE'])
+def delete_cart(id):
+    cart = Carts.query.get(id)
+    db.session.delete(cart)
     db.session.commit()
-    response = order_schema.dump(order)
+    response = cart_schema.dump(cart)
     return jsonify(response)
-
