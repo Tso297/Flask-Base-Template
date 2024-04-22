@@ -8,11 +8,51 @@ from flask_cors import cross_origin
 import json
 
 stripe.api_key = 'sk_test_51P21ugLpIM9qGk22XNvAbtnZLykj4qXi2yMC3aRzMvRvDEOalWBJMQDNUE8MPiqx6bMfVZtnKuovVdfa5F94aYuI00zXYonIGk'
+endpoint_secret = 'whsec_EuGg7bLhjeeO98cFjj3ILL0QGfDou8vv'  # The signing secret from Stripe Dashboard
 
+@api.route('/api/webhook', methods=['POST'])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        return 'Invalid payload', 400
+    except stripe.error.SignatureVerificationError as e:
+        return 'Invalid signature', 400
+
+    # Process the checkout.session.completed event
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        handle_checkout_session(session)
+
+    return jsonify({'status': 'success'}), 200
+
+def handle_checkout_session(session):
+    user_id = session.get('client_reference_id')
+    cart = Carts.query.filter_by(user_id=user_id).first()
+
+    if cart:
+        create_order_from_cart(cart, session)
+        clear_user_cart(cart)
+        db.session.commit()
+
+def create_order_from_cart(cart, session):
+    shipping_details = session['shipping']
+    new_order = Orders(user_id=cart.user_id, custom_blend=cart.custom_blend, totalPrice=cart.totalPrice, shipping_address=str(shipping_details))
+    db.session.add(new_order)
+
+def clear_user_cart(cart):
+    db.session.delete(cart)
+
+###################################################
 @api.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
+    
     cart_items = Carts.query.first()
-    print(cart_items.totalPrice)
     if cart_items:
         totalPrice = int(round(cart_items.totalPrice, 2) * 100) # Assuming totalPrice is a field in your Cart model
         print(totalPrice)
@@ -26,7 +66,7 @@ def create_checkout_session():
                     'currency': 'usd',
                     'unit_amount': totalPrice,
                     'product_data': {
-                        'name': 'Your Blends',
+                        'name': 'Your Blend Total',
                     },
                 },
                 'quantity': 1,
@@ -34,59 +74,11 @@ def create_checkout_session():
         ],
         mode='payment',
         success_url='http://localhost:5173/',
-        cancel_url='http://localhost:5173/'
+        cancel_url='http://localhost:5173/checkout'
     )
 
     return jsonify(id=session.id, url=session.url)  # Send back the URL to the client
 
-
-# @app.route('/success', methods=['GET'])
-# def order_success():
-#     session_id = request.args.get('session_id')
-#     if session_id:
-#         # Here you can handle post-payment logic, like creating an order record
-#         # Logic to create an order or similar action
-#         return 'Order created successfully', 200
-#     return 'No session ID provided', 400
-
-# Need to figure out how to make the success url hit my api for a remove
-
-###################################################
-@api.route('/checkout', methods = ['POST'])
-def create_cart():
-    user_id = request.headers.get('User')
-
-    # Retrieve the JSON data sent from the client
-    received_data = request.get_json()
-
-    # Debug: Print the received data to see its structure
-    print("Received data:", received_data)
-
-    # Ensure received_data is always a list
-    if isinstance(received_data, dict):
-        received_data = [received_data]  # Convert to list if it's a single dictionary
-
-    totalPrice = 0
-    # Calculate the total price
-    for blend in received_data:
-        if 'totalPrice' not in blend:
-            return jsonify({"error": "Missing totalPrice in some items"}), 400
-        totalPrice += blend['totalPrice']  # Sum the totalPrice from each blend
-    totalPrice = round(totalPrice, 2)  # Round the totalPrice after summing
-
-    # Convert custom_blend to string for database storage
-    custom_blend_str = str(received_data)
-
-
-
-    # Create a new Carts object and add it to the database
-    cart = Carts(custom_blend=custom_blend_str, totalPrice=totalPrice, user_id=user_id)
-    db.session.add(cart)
-    db.session.commit()
-
-    # Serialize the cart data for the response
-    response = cart_schema.dump(cart)
-    return jsonify(response)
 ####################################################
 @api.route('/orders', methods = ['POST'])
 def create_order():
@@ -125,13 +117,31 @@ def get_carts():
     return jsonify(response)
 
 ######################################################
-@api.route('/cart', methods = ['DELETE'])
-def delete_cart(id):
-    cart = Carts.query.get(id)
-    db.session.delete(cart)
-    db.session.commit()
-    response = cart_schema.dump(cart)
-    return jsonify(response)
+@api.route('/cart/item/<string:itemName>', methods=['DELETE'])
+@cross_origin(supports_credentials=True)
+def delete_item(itemName):
+    user_id = request.headers.get('User')
+    if not user_id:
+        print("No User ID provided")
+        return jsonify({'error': 'Unauthorized access'}), 401
+
+    print(f"Attempting to remove item: {itemName} for user: {user_id}")
+    cart = Carts.query.filter_by(user_id=user_id).first()
+    if not cart:
+        return jsonify({'error': 'Cart not found'}), 404
+
+    try:
+        items = json.loads(cart.custom_blend)
+        items = [item for item in items if item['name'] != itemName]
+        cart.custom_blend = json.dumps(items)
+        total_price = sum(item['totalPrice'] * item['quantity'] for item in items)
+        cart.totalPrice = total_price
+
+        db.session.commit()
+        return jsonify({'message': 'Item removed', 'updatedCart': items, 'totalPrice': total_price}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update cart', 'message': str(e)}), 500
 ######################################################
 @api.route('/update-cart', methods=['POST', 'OPTIONS'])
 @cross_origin(origin='http://localhost:5173', methods=['POST'], allow_headers=['Content-Type', 'Authorization', 'User'])
@@ -144,92 +154,96 @@ def update_cart():
         if not user_id:
             return jsonify({'error': 'User ID is required'}), 400
 
-        data = request.get_json()
+        data = request.get_json(force=True)  # Make sure to parse incoming JSON correctly
         print(f'Data received: {data}')
 
-        # Calculate total price
-        totalPrice = 0
-        for item in data:
-            totalPrice += item.get('totalPrice', 0) * item.get('quantity', 1)
+        cart = Carts.query.filter_by(user_id=user_id).first()
+        if not cart:
+            # If there's no existing cart, create a new one
+            cart = Carts(user_id=user_id, custom_blend=json.dumps(data), totalPrice=0)
+            db.session.add(cart)
+
+        existing_items = json.loads(cart.custom_blend) if cart.custom_blend else []
+
+        # Create a dictionary for quick access to existing items by name
+        item_dict = {item['name']: item for item in existing_items}
+
+        # Merge incoming items with existing ones
+        for new_item in data:
+            if new_item['name'] in item_dict:
+                # Update existing item quantities and totalPrice
+                existing_item = item_dict[new_item['name']]
+                existing_item['quantity'] += new_item['quantity']
+                existing_item['totalPrice'] = round(existing_item['quantity'] * (existing_item['totalPrice'] / (existing_item['quantity'] - new_item['quantity'])), 2)
+            else:
+                # Add new item if it doesn't exist
+                item_dict[new_item['name']] = new_item
+
+        # Calculate the total price from updated items
+        totalPrice = sum(item['totalPrice'] * item['quantity'] for item in item_dict.values())
         totalPrice = round(totalPrice, 2)
         print(f'Calculated Total Price: {totalPrice}')
 
-        cart = Carts.query.filter_by(user_id=user_id).first()
-        print(f'Existing cart: {cart}')
-
-        if not cart:
-            cart = Carts(user_id=user_id, custom_blend=json.dumps(data), totalPrice=totalPrice)
-            db.session.add(cart)
-        else:
-            # Assuming custom_blend is a JSON field and we can append data to it
-            existing_data = json.loads(cart.custom_blend) if cart.custom_blend else []
-            existing_data.extend(data)
-            cart.custom_blend = json.dumps(existing_data)
-            cart.totalPrice = totalPrice  # Update total price
+        # Update the cart with merged items
+        cart.custom_blend = json.dumps(list(item_dict.values()))
+        cart.totalPrice = totalPrice
 
         db.session.commit()
         return jsonify(cart_schema.dump(cart)), 200
     except Exception as e:
+        db.session.rollback()
         print(f'An error occurred: {e}')
         return jsonify({'error': 'Internal Server Error'}), 500
-#######################################################
-@api.route('/users', methods = ['POST'])
-def create_user():
 
-    displayName = request.json['displayName']
-    user_id = request.json['uid']
-    email = request.json['email']
-    user = User(displayName, user_id, email)
-
-    db.session.add(user)
-    db.session.commit()
-
-    response = user_schema.dump(user)
-    return jsonify(response)
 #####################################################
 @api.route('/update-cart-item', methods=['POST'])
 def update_cart_item():
+    print("Request to update cart item received")
     user_id = request.headers.get('User')
     if not user_id:
+        print("Unauthorized access attempt without User ID")
         return jsonify({'error': 'Unauthorized access'}), 401
 
     data = request.get_json()
+    print(f"Data received for update: {data}")
     if not data:
+        print("No data provided in the request")
         return jsonify({'error': 'No data provided'}), 400
 
     try:
-        print(f"Received update for user {user_id} with the following data: {data}")
         cart = Carts.query.filter_by(user_id=user_id).first()
         if not cart:
+            print(f"No cart found for user: {user_id}")
             return jsonify({'error': 'Cart not found'}), 404
 
-        # Assume cart.custom_blend is stored in JSON and needs to be parsed
+        print(f"Existing cart items before update: {cart.custom_blend}")
         cart_items = json.loads(cart.custom_blend) if cart.custom_blend else []
 
         updated_items = []
         for item_update in data:
-            # Convert quantity to integer
-            if 'quantity' in item_update:
-                try:
-                    item_update['quantity'] = int(item_update['quantity'])
-                except ValueError:
-                    return jsonify({'error': 'Invalid quantity value'}), 400
-
-            # Find and update the item by name
+            # Convert quantity to integer if necessary
+            item_update['quantity'] = int(item_update['quantity'])
             item = next((item for item in cart_items if item['name'] == item_update['name']), None)
             if item:
                 item['quantity'] = item_update['quantity']
+                print(f"Updating item: {item['name']} to quantity {item['quantity']}")
             else:
-                # Add new item if it does not exist in the cart
+                print(f"Adding new item to cart: {item_update['name']}")
                 cart_items.append(item_update)
-
             updated_items.append(item_update)
 
         # Update the cart's custom_blend with the modified list of items
         cart.custom_blend = json.dumps(cart_items)
-        db.session.commit()
+        print(f"Cart items after update: {cart.custom_blend}")
 
-        return jsonify(updated_items), 200
+        # Recalculate total price
+        totalPrice = sum(item['totalPrice'] * item['quantity'] for item in cart_items)
+        cart.totalPrice = round(totalPrice, 2)
+        print(f"Updated total price: {cart.totalPrice}")
+
+        db.session.commit()
+        return jsonify({'updatedItems': cart_items, 'totalPrice': cart.totalPrice}), 200
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return jsonify({'error': 'Failed to update cart'}), 500
+        print(f"An error occurred during cart update: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update cart', 'message': str(e)}), 500

@@ -31,11 +31,13 @@ class Orders(db.Model):
       id = db.Column(db.Integer, primary_key= True)
       order = db.Column(db.String(10000), nullable = False)
       totalPrice = db.Column(db.Float(precision=2), nullable=False)
+      shipping_address = db.Column(db.String(10000), nullable = False)
       createdAt = db.Column(db.DateTime, default = datetime.now(timezone.utc))
     
-      def __init__(self, order, totalPrice):
+      def __init__(self, order, totalPrice, shipping_address):
           self.order = order
           self.totalPrice = totalPrice
+          self.shipping_address = shipping_address
 
 class UserSchema(Marshmallow().Schema):
     class Meta:
@@ -53,7 +55,7 @@ carts_schema = CartSchema(many=True)
 
 class OrderSchema(Marshmallow().Schema):
     class Meta:
-        fields = ['id', 'custom_blend', 'totalPrice']
+        fields = ['id', 'custom_blend', 'totalPrice', 'shipping_address']
 
 order_schema = OrderSchema()
 orders_schema = OrderSchema(many=True)
