@@ -12,7 +12,9 @@ db = SQLAlchemy(app)
 #db.init_app(app)
 migrate = Migrate(app,db)
 
-cors = CORS(app)
+
+CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": "*"}}, allow_headers=["Content-Type", "Authorization", "x-access-token", "User"])
+
 
 from . import models
 
