@@ -8,60 +8,28 @@ from flask_cors import cross_origin
 import json
 
 stripe.api_key = 'sk_test_51P21ugLpIM9qGk22XNvAbtnZLykj4qXi2yMC3aRzMvRvDEOalWBJMQDNUE8MPiqx6bMfVZtnKuovVdfa5F94aYuI00zXYonIGk'
-endpoint_secret = 'whsec_EuGg7bLhjeeO98cFjj3ILL0QGfDou8vv'  # The signing secret from Stripe Dashboard
+endpoint_secret = 'whsec_EuGg7bLhjeeO98cFjj3ILL0QGfDou8vv'
 
-@api.route('/api/webhook', methods=['POST'])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get('Stripe-Signature')
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
-    except ValueError as e:
-        return 'Invalid payload', 400
-    except stripe.error.SignatureVerificationError as e:
-        return 'Invalid signature', 400
-
-    # Process the checkout.session.completed event
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        handle_checkout_session(session)
-
-    return jsonify({'status': 'success'}), 200
-
-def handle_checkout_session(session):
-    user_id = session.get('client_reference_id')
-    cart = Carts.query.filter_by(user_id=user_id).first()
-
-    if cart:
-        create_order_from_cart(cart, session)
-        clear_user_cart(cart)
-        db.session.commit()
-
-def create_order_from_cart(cart, session):
-    shipping_details = session['shipping']
-    new_order = Orders(user_id=cart.user_id, custom_blend=cart.custom_blend, totalPrice=cart.totalPrice, shipping_address=str(shipping_details))
-    db.session.add(new_order)
-
-def clear_user_cart(cart):
-    db.session.delete(cart)
-
-###################################################
 @api.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
-    
+    print("Starting the creation of a checkout session...")
     cart_items = Carts.query.first()
     if cart_items:
-        totalPrice = int(round(cart_items.totalPrice, 2) * 100) # Assuming totalPrice is a field in your Cart model
-        print(totalPrice)
+        print(f"Found cart items, total price before rounding: {cart_items.totalPrice}")
+        totalPrice = int(round(cart_items.totalPrice, 2) * 100)  # Convert totalPrice to cents for Stripe
+        print(f"Total price after converting to cents: {totalPrice}")
     else:
         totalPrice = 0
+        print("No cart items found, setting total price to 0.")
 
-    session = stripe.checkout.Session.create(
-        line_items=[
-            {
+    try:
+        print("Attempting to create Stripe checkout session...")
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            shipping_address_collection={
+                'allowed_countries': ['US', 'CA', 'GB'],
+            },
+            line_items=[{
                 'price_data': {
                     'currency': 'usd',
                     'unit_amount': totalPrice,
@@ -70,15 +38,85 @@ def create_checkout_session():
                     },
                 },
                 'quantity': 1,
-            }
-        ],
-        mode='payment',
-        success_url='http://localhost:5173/',
-        cancel_url='http://localhost:5173/checkout'
-    )
+            }],
+            mode='payment',
+            success_url='http://localhost:5173/success',
+            cancel_url='http://localhost:5173/checkout',
+            metadata={'user_uid': cart_items.user_id}  # Ensuring user UID is correctly associated
+        )
+        print(f"Stripe session created successfully, session ID: {session.id}")
+    except Exception as e:
+        print(f"Failed to create Stripe session: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-    return jsonify(id=session.id, url=session.url)  # Send back the URL to the client
+    return jsonify(id=session.id, url=session.url)
 
+###################################################
+@api.route('/stripe-webhook', methods=['POST'])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+
+    print("Received webhook with payload:", payload)
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+        print("Webhook event constructed successfully.")
+    except ValueError as e:
+        print("Error while decoding event!", str(e))
+        return jsonify({'error': 'Invalid payload'}), 400
+    except stripe.error.SignatureVerificationError as e:
+        print("Signature verification failed!", str(e))
+        return jsonify({'error': 'Invalid signature'}), 400
+
+    print("Event type:", event['type'])
+
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        user_uid = session['metadata'].get('user_uid')
+        print("Checkout session completed for user_uid:", user_uid)
+
+        cart = Carts.query.filter_by(user_id=user_uid).first()
+
+        if not cart:
+            print("No cart found for user_uid:", user_uid)
+            return jsonify({'error': 'Cart not found'}), 404
+
+        print("Cart found for user_uid:", user_uid, "; Cart ID:", cart.id)
+
+        # Extract shipping details
+        shipping = session.get('shipping', {})
+        shipping_address = shipping.get('address', {})
+        print("Shipping details received:", shipping)
+
+        # Create an order using the cart details and shipping information
+        order = Orders(
+            user_id=user_uid,  # Assuming Orders model uses user_id as foreign key
+            custom_blend=cart.custom_blend,  # Assuming 'custom_blend' holds JSON string of items
+            totalPrice=cart.totalPrice,
+            shipping_address=json.dumps({
+                "name": shipping.get('name', ''),
+                "line1": shipping_address.get('line1', ''),
+                "city": shipping_address.get('city', ''),
+                "country": shipping_address.get('country', ''),
+                "postal_code": shipping_address.get('postal_code', '')
+            })  # Storing shipping address as a JSON string
+        )
+
+        db.session.add(order)
+        print("Order added with ID:", order.id)
+
+        db.session.delete(cart)  # Clear the cart
+        print("Cart cleared for user_uid:", user_uid)
+
+        db.session.commit()
+        print("Database transaction committed.")
+
+        return jsonify({'message': 'Order processed and cart cleared'}), 200
+
+    return jsonify({'message': 'Event received'}), 200
 ####################################################
 @api.route('/orders', methods = ['POST'])
 def create_order():
