@@ -40,7 +40,7 @@ def create_checkout_session():
                 'quantity': 1,
             }],
             mode='payment',
-            success_url='http://localhost:5173/success',
+            success_url='http://localhost:5173',
             cancel_url='http://localhost:5173/checkout',
             metadata={'user_uid': cart_items.user_id}  # Ensuring user UID is correctly associated
         )
