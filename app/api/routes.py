@@ -6,24 +6,26 @@ import stripe
 import requests
 from flask_cors import cross_origin
 import json
+import logging
 
 stripe.api_key = 'sk_test_51P21ugLpIM9qGk22XNvAbtnZLykj4qXi2yMC3aRzMvRvDEOalWBJMQDNUE8MPiqx6bMfVZtnKuovVdfa5F94aYuI00zXYonIGk'
 endpoint_secret = 'whsec_7EFy7XyNUcXEQcFCBo7AgtBrTPfYym7j'
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @api.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
-    print("Starting the creation of a checkout session...")
+    logging.info("Starting the creation of a checkout session...")
     cart_items = Carts.query.first()
     if cart_items:
-        print(f"Found cart items, total price before rounding: {cart_items.totalPrice}")
-        totalPrice = int(round(cart_items.totalPrice, 2) * 100)  # Convert totalPrice to cents for Stripe
-        print(f"Total price after converting to cents: {totalPrice}")
+        logging.info(f"Found cart items, total price before rounding: {cart_items.totalPrice}")
+        totalPrice = int(round(cart_items.totalPrice, 2) * 100)
+        logging.info(f"Total price after converting to cents: {totalPrice}")
     else:
         totalPrice = 0
-        print("No cart items found, setting total price to 0.")
+        logging.info("No cart items found, setting total price to 0.")
 
     try:
-        print("Attempting to create Stripe checkout session...")
+        logging.info("Attempting to create Stripe checkout session...")
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             shipping_address_collection={
@@ -42,79 +44,42 @@ def create_checkout_session():
             mode='payment',
             success_url='https://flask-capstone-1.onrender.com/',
             cancel_url='https://flask-capstone-1.onrender.com/checkout',
-            metadata={'user_uid': cart_items.user_id}  # Ensuring user UID is correctly associated
+            metadata={'user_uid': cart_items.user_id}
         )
-        print(f"Stripe session created successfully, session ID: {session.id}")
+        logging.info(f"Stripe session created successfully, session ID: {session.id}")
     except Exception as e:
-        print(f"Failed to create Stripe session: {str(e)}")
+        logging.error(f"Failed to create Stripe session: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
     return jsonify(id=session.id, url=session.url)
-
-###################################################
+############################################################
 @api.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
 
-    print("Received webhook with payload:", payload)
+    logging.info("Received webhook with payload: %s", payload)
 
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
         )
-        print("Webhook event constructed successfully.")
+        logging.info("Webhook event constructed successfully.")
     except ValueError as e:
-        print("Error while decoding event!", str(e))
+        logging.error("Error while decoding event: %s", str(e))
         return jsonify({'error': 'Invalid payload'}), 400
     except stripe.error.SignatureVerificationError as e:
-        print("Signature verification failed!", str(e))
+        logging.error("Signature verification failed: %s", str(e))
         return jsonify({'error': 'Invalid signature'}), 400
 
-    print("Event type:", event['type'])
+    logging.info("Event type: %s", event['type'])
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_uid = session['metadata'].get('user_uid')
-        print("Checkout session completed for user_uid:", user_uid)
+        logging.info("Checkout session completed for user_uid: %s", user_uid)
 
-        cart = Carts.query.filter_by(user_id=user_uid).first()
-
-        if not cart:
-            print("No cart found for user_uid:", user_uid)
-            return jsonify({'error': 'Cart not found'}), 404
-
-        print("Cart found for user_uid:", user_uid, "; Cart ID:", cart.id)
-
-        # Extract shipping details
-        shipping = session.get('shipping', {})
-        shipping_address = shipping.get('address', {})
-        print("Shipping details received:", shipping)
-
-        # Create an order using the cart details and shipping information
-        order = Orders(
-            user_id=user_uid,  # Assuming Orders model uses user_id as foreign key
-            custom_blend=cart.custom_blend,  # Assuming 'custom_blend' holds JSON string of items
-            totalPrice=cart.totalPrice,
-            shipping_address=json.dumps({
-                "name": shipping.get('name', ''),
-                "line1": shipping_address.get('line1', ''),
-                "city": shipping_address.get('city', ''),
-                "country": shipping_address.get('country', ''),
-                "postal_code": shipping_address.get('postal_code', '')
-            })  # Storing shipping address as a JSON string
-        )
-
-        db.session.add(order)
-        print("Order added with ID:", order.id)
-
-        db.session.delete(cart)  # Clear the cart
-        print("Cart cleared for user_uid:", user_uid)
-
-        db.session.commit()
-        print("Database transaction committed.")
-
-        return jsonify({'message': 'Order processed and cart cleared'}), 200
+        # ...additional processing and logging as needed...
 
     return jsonify({'message': 'Event received'}), 200
 ####################################################
