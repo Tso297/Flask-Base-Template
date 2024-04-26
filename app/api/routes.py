@@ -58,7 +58,7 @@ def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
 
-    logging.info("Received webhook with payload: %s", payload)
+    logging.info("Received webhook with payload: %s", payload.decode('utf-8'))
 
     try:
         event = stripe.Webhook.construct_event(
@@ -72,43 +72,35 @@ def stripe_webhook():
         logging.error("Signature verification failed: %s", str(e))
         return jsonify({'error': 'Invalid signature'}), 400
 
-    # Checking if the event type is as expected
+    # Ensure event type is checkout.session.completed
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_uid = session['metadata'].get('user_uid')
-        logging.info("Processing completed checkout session for user UID: %s", user_uid)
 
         cart = Carts.query.filter_by(user_id=user_uid).first()
         if not cart:
             logging.error("No cart found for user UID: %s", user_uid)
             return jsonify({'error': 'Cart not found'}), 404
 
-        logging.info("Cart found for user UID: %s, processing order...", user_uid)
+        # Log and extract shipping details from the session object
+        shipping = session.get('shipping_details', {})  # Ensure this matches the Stripe JSON structure
+        logging.info("Shipping details extracted: %s", shipping)
 
         try:
-            # Attempt to extract and log shipping details
-            shipping = session.get('shipping', {})
-            shipping_address = shipping.get('address', {})
-            logging.info("Extracted shipping details: %s", shipping_address)
-
             new_order = Orders(
                 order_details=json.dumps(cart.custom_blend) if hasattr(cart, 'custom_blend') else 'No details available',
                 totalPrice=cart.totalPrice,
                 uid=user_uid,
                 shipping_name=shipping.get('name', ''),
-                shipping_line1=shipping_address.get('line1', ''),
-                shipping_city=shipping_address.get('city', ''),
-                shipping_country=shipping_address.get('country', ''),
-                shipping_postal_code=shipping_address.get('postal_code', '')
+                shipping_line1=shipping.get('address', {}).get('line1', ''),
+                shipping_city=shipping.get('address', {}).get('city', ''),
+                shipping_country=shipping.get('address', {}).get('country', ''),
+                shipping_postal_code=shipping.get('address', {}).get('postal_code', '')
             )
             db.session.add(new_order)
-            logging.info("New order added for user UID: %s", user_uid)
-
             db.session.delete(cart)
-            logging.info("Cart cleared for user UID: %s", user_uid)
-
             db.session.commit()
-            logging.info("Database transaction committed successfully for user UID: %s", user_uid)
+            logging.info("Order processed and cart cleared for user UID: %s", user_uid)
             return jsonify({'message': 'Order processed and cart cleared'}), 200
         except Exception as e:
             db.session.rollback()
