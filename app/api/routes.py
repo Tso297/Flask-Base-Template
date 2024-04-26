@@ -57,9 +57,7 @@ def create_checkout_session():
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
-
-    logging.info("Received webhook with payload: %s", payload)
-
+    
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
@@ -72,16 +70,45 @@ def stripe_webhook():
         logging.error("Signature verification failed: %s", str(e))
         return jsonify({'error': 'Invalid signature'}), 400
 
-    logging.info("Event type: %s", event['type'])
-
+    # Process the checkout.session.completed event
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_uid = session['metadata'].get('user_uid')
-        logging.info("Checkout session completed for user_uid: %s", user_uid)
 
-        # ...additional processing and logging as needed...
+        # Fetch cart items (Assuming you have a model and method to get cart data)
+        cart = Carts.query.filter_by(user_id=user_uid).first()
+        if not cart:
+            logging.error("No cart found for user UID: %s", user_uid)
+            return jsonify({'error': 'Cart not found'}), 404
 
-    return jsonify({'message': 'Event received'}), 200
+        # Construct the order details from the cart and shipping information
+        shipping = session.get('shipping', {})
+        shipping_address = shipping.get('address', {})
+
+        new_order = Orders(
+            order_details=cart.order_details,  # Assuming 'order_details' in cart
+            totalPrice=cart.totalPrice,
+            uid=user_uid,
+            shipping_name=shipping.get('name', ''),
+            shipping_line1=shipping_address.get('line1', ''),
+            shipping_city=shipping_address.get('city', ''),
+            shipping_country=shipping_address.get('country', ''),
+            shipping_postal_code=shipping_address.get('postal_code', '')
+        )
+        db.session.add(new_order)
+        logging.info("Order added with ID: %s", new_order.id)
+
+        # Clear the cart
+        db.session.delete(cart)
+        logging.info("Cart cleared for user UID: %s", user_uid)
+
+        # Commit changes to the database
+        db.session.commit()
+        logging.info("Database transaction committed for user UID: %s", user_uid)
+
+        return jsonify({'message': 'Order processed and cart cleared'}), 200
+    else:
+        return jsonify({'message': 'Event received but not processed'}), 200
 ####################################################
 @api.route('/orders', methods = ['POST'])
 def create_order():
