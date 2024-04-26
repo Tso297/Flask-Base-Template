@@ -58,13 +58,18 @@ def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
 
+    logging.info("Received webhook with payload: %s", payload)
+
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
         )
+        logging.info("Webhook event constructed successfully.")
     except ValueError as e:
+        logging.error("Error while decoding event: %s", str(e))
         return jsonify({'error': 'Invalid payload'}), 400
     except stripe.error.SignatureVerificationError as e:
+        logging.error("Signature verification failed: %s", str(e))
         return jsonify({'error': 'Invalid signature'}), 400
 
     if event['type'] == 'checkout.session.completed':
@@ -73,31 +78,42 @@ def stripe_webhook():
 
         cart = Carts.query.filter_by(user_id=user_uid).first()
         if not cart:
+            logging.error("No cart found for user UID: %s", user_uid)
             return jsonify({'error': 'Cart not found'}), 404
 
         try:
-            # Assume `custom_blend` represents the order details
-            order_details = json.dumps(cart.custom_blend) if hasattr(cart, 'custom_blend') else 'No details available'
+            # Extract details from cart, assuming custom_blend is the required order detail
+            order_details = cart.custom_blend if hasattr(cart, 'custom_blend') else 'No details available'
+            totalPrice = cart.totalPrice if hasattr(cart, 'totalPrice') else 0
+
+            # Extract shipping details
+            shipping = session.get('shipping', {})
+            shipping_address = shipping.get('address', {})
 
             new_order = Orders(
                 order_details=order_details,
-                totalPrice=cart.totalPrice,
+                totalPrice=totalPrice,
                 uid=user_uid,
-                shipping_name=session['shipping']['name'],
-                shipping_line1=session['shipping']['address']['line1'],
-                shipping_city=session['shipping']['address']['city'],
-                shipping_country=session['shipping']['address']['country'],
-                shipping_postal_code=session['shipping']['address']['postal_code']
+                shipping_name=shipping.get('name', ''),
+                shipping_line1=shipping_address.get('line1', ''),
+                shipping_city=shipping_address.get('city', ''),
+                shipping_country=shipping_address.get('country', ''),
+                shipping_postal_code=shipping_address.get('postal_code', '')
             )
             db.session.add(new_order)
             db.session.delete(cart)
             db.session.commit()
+            logging.info("Order processed and cart cleared for user UID: %s", user_uid)
             return jsonify({'message': 'Order processed and cart cleared'}), 200
         except Exception as e:
             db.session.rollback()
+            logging.error("Error processing order for user UID: %s: %s", user_uid, str(e))
             return jsonify({'error': str(e)}), 500
+    else:
+        logging.info("Received an unhandled event type: %s", event['type'])
+        return jsonify({'message': 'Event received but not processed'}), 200
 
-    return jsonify({'message': 'Event received but not processed'}), 200
+    return jsonify({'message': 'Event received'}), 200
 ####################################################
 @api.route('/orders', methods = ['POST'])
 def create_order():
