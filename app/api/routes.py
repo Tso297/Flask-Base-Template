@@ -40,8 +40,8 @@ def create_checkout_session():
                 'quantity': 1,
             }],
             mode='payment',
-            success_url='http://localhost:5173',
-            cancel_url='http://localhost:5173/checkout',
+            success_url='https://flask-capstone-1.onrender.com/',
+            cancel_url='https://flask-capstone-1.onrender.com/checkout',
             metadata={'user_uid': cart_items.user_id}  # Ensuring user UID is correctly associated
         )
         print(f"Stripe session created successfully, session ID: {session.id}")
