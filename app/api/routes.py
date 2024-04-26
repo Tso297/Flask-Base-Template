@@ -8,7 +8,7 @@ from flask_cors import cross_origin
 import json
 
 stripe.api_key = 'sk_test_51P21ugLpIM9qGk22XNvAbtnZLykj4qXi2yMC3aRzMvRvDEOalWBJMQDNUE8MPiqx6bMfVZtnKuovVdfa5F94aYuI00zXYonIGk'
-endpoint_secret = 'whsec_EuGg7bLhjeeO98cFjj3ILL0QGfDou8vv'
+endpoint_secret = 'whsec_7EFy7XyNUcXEQcFCBo7AgtBrTPfYym7j'
 
 @api.route('/create-checkout-session', methods=['POST'])
 def create_checkout_session():
