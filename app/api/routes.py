@@ -285,6 +285,12 @@ def list_orders():
     orders = Orders.query.order_by(Orders.createdAt).all()  # Assuming createdAt is the timestamp
     return jsonify(orders_schema.dump(orders, many=True))
 
+@api.route('/fulfilled_orders')
+def list_fulfilled_orders():
+    # Assuming `Fulfilled` is your model for fulfilled orders
+    fulfilled_orders = Fulfilled.query.order_by(Fulfilled.createdAt).all()
+    return jsonify(fulfilleds_schema.dump(fulfilled_orders, many=True))
+
 @api.route('/fulfill_order/<int:order_id>', methods=['POST'])
 def fulfill_order(order_id):
     order = Orders.query.get_or_404(order_id)
