@@ -53,7 +53,6 @@ def create_checkout_session():
 
     return jsonify(id=session.id, url=session.url)
 ############################################################
-@api.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
@@ -80,9 +79,9 @@ def stripe_webhook():
             return jsonify({'error': 'Cart not found'}), 404
 
         # Extract shipping details
-        shipping_details = session.get('shipping', {}).get('address', {})
+        shipping_details = session.get('shipping_details', {})
         if not shipping_details:
-            logging.error("No shipping details found in session")
+            logging.error("No shipping details found in session for user UID: %s", user_uid)
             shipping_details = {}  # Use an empty dictionary if no shipping details
 
         try:
@@ -90,11 +89,11 @@ def stripe_webhook():
                 order_details=json.dumps(cart.custom_blend) if isinstance(cart.custom_blend, dict) else cart.custom_blend,
                 totalPrice=cart.totalPrice,
                 uid=user_uid,
-                shipping_name=session.get('shipping', {}).get('name', ''),
-                shipping_line1=shipping_details.get('line1', ''),
-                shipping_city=shipping_details.get('city', ''),
-                shipping_country=shipping_details.get('country', ''),
-                shipping_postal_code=shipping_details.get('postal_code', '')
+                shipping_name=shipping_details.get('name', ''),
+                shipping_line1=shipping_details.get('address', {}).get('line1', ''),
+                shipping_city=shipping_details.get('address', {}).get('city', ''),
+                shipping_country=shipping_details.get('address', {}).get('country', ''),
+                shipping_postal_code=shipping_details.get('address', {}).get('postal_code', '')
             )
             db.session.add(new_order)
             db.session.delete(cart)
