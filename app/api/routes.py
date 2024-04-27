@@ -1,6 +1,6 @@
 from app import db
 from flask import request, jsonify, redirect
-from app.models import User, Carts, Orders, user_schema, users_schema, cart_schema, carts_schema, order_schema, orders_schema
+from app.models import User, Carts, Orders,Fulfilled, user_schema, users_schema, cart_schema, carts_schema, order_schema, orders_schema, fulfilled_schema, fulfilleds_schema
 from . import api
 import stripe
 import requests
@@ -279,3 +279,44 @@ def update_cart_item():
         print(f"An error occurred during cart update: {e}")
         db.session.rollback()
         return jsonify({'error': 'Failed to update cart', 'message': str(e)}), 500
+#####################################################################################
+@api.route('/orders')
+def list_orders():
+    orders = Orders.query.all()
+    return jsonify([order.to_dict() for order in orders])  # Assuming to_dict() method on Orders
+
+@api.route('/fulfill_order/<int:order_id>', methods=['POST'])
+def fulfill_order(order_id):
+    order = Orders.query.get_or_404(order_id)
+    fulfilled_order = Fulfilled(
+        order_details=order.order_details,
+        totalPrice=order.totalPrice,
+        uid=order.uid,
+        shipping_name=order.shipping_name,
+        shipping_line1=order.shipping_line1,
+        shipping_city=order.shipping_city,
+        shipping_country=order.shipping_country,
+        shipping_postal_code=order.shipping_postal_code
+    )
+    db.session.add(fulfilled_order)
+    db.session.delete(order)
+    db.session.commit()
+    return jsonify({'success': True, 'message': 'Order fulfilled'})
+
+@api.route('/unfulfill_order/<int:order_id>', methods=['POST'])
+def unfulfill_order(order_id):
+    fulfilled = Fulfilled.query.get_or_404(order_id)
+    order = Orders(
+        order_details=fulfilled.order_details,
+        totalPrice=fulfilled.totalPrice,
+        uid=fulfilled.uid,
+        shipping_name=fulfilled.shipping_name,
+        shipping_line1=fulfilled.shipping_line1,
+        shipping_city=fulfilled.shipping_city,
+        shipping_country=fulfilled.shipping_country,
+        shipping_postal_code=fulfilled.shipping_postal_code
+    )
+    db.session.add(order)
+    db.session.delete(fulfilled)
+    db.session.commit()
+    return jsonify({'success': True, 'message': 'Order moved back to unfulfilled'})
