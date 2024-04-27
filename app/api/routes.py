@@ -282,8 +282,8 @@ def update_cart_item():
 #####################################################################################
 @api.route('/orders')
 def list_orders():
-    orders = Orders.query.all()
-    return jsonify([order.to_dict() for order in orders])  # Assuming to_dict() method on Orders
+    orders = Orders.query.order_by(Orders.createdAt).all()  # Assuming createdAt is the timestamp
+    return jsonify(orders_schema.dump(orders, many=True))
 
 @api.route('/fulfill_order/<int:order_id>', methods=['POST'])
 def fulfill_order(order_id):
