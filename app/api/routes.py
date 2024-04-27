@@ -57,6 +57,7 @@ def create_checkout_session():
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
+
     logging.info("Received webhook with payload: %s", payload.decode('utf-8'))
 
     try:
@@ -72,32 +73,28 @@ def stripe_webhook():
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_uid = session['metadata'].get('user_uid')
-        logging.info("Processing completed checkout session for user UID: %s", user_uid)
 
         cart = Carts.query.filter_by(user_id=user_uid).first()
         if not cart:
             logging.error("No cart found for user UID: %s", user_uid)
             return jsonify({'error': 'Cart not found'}), 404
-        logging.info("Cart found for user UID: %s, processing order...", user_uid)
 
-        # Process order details from cart
-        order_details = json.dumps(cart.custom_blend) if isinstance(cart.custom_blend, dict) else cart.custom_blend
-
-        # Extract and log shipping details
-        shipping = session.get('shipping', {}).get('address', {})
-        shipping_name = session.get('shipping', {}).get('name', '')
-        logging.info("Extracted shipping details: Name: %s, Address: %s", shipping_name, shipping)
+        # Extract shipping details
+        shipping_details = session.get('shipping', {}).get('address', {})
+        if not shipping_details:
+            logging.error("No shipping details found in session")
+            shipping_details = {}  # Use an empty dictionary if no shipping details
 
         try:
             new_order = Orders(
-                order_details=order_details,
+                order_details=json.dumps(cart.custom_blend) if isinstance(cart.custom_blend, dict) else cart.custom_blend,
                 totalPrice=cart.totalPrice,
                 uid=user_uid,
-                shipping_name=shipping_name,
-                shipping_line1=shipping.get('line1', ''),
-                shipping_city=shipping.get('city', ''),
-                shipping_country=shipping.get('country', ''),
-                shipping_postal_code=shipping.get('postal_code', '')
+                shipping_name=session.get('shipping', {}).get('name', ''),
+                shipping_line1=shipping_details.get('line1', ''),
+                shipping_city=shipping_details.get('city', ''),
+                shipping_country=shipping_details.get('country', ''),
+                shipping_postal_code=shipping_details.get('postal_code', '')
             )
             db.session.add(new_order)
             db.session.delete(cart)
