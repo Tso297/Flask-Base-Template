@@ -53,6 +53,7 @@ def create_checkout_session():
 
     return jsonify(id=session.id, url=session.url)
 ############################################################
+@api.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
