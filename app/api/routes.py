@@ -53,7 +53,7 @@ def create_checkout_session():
 
     return jsonify(id=session.id, url=session.url)
 ############################################################
-@api.route('/stripe-webhook', methods=['POST'])
+@app.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
@@ -62,47 +62,52 @@ def stripe_webhook():
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
         )
-        logging.info("Webhook event constructed successfully.")
+        logging.info("Successfully constructed webhook event.")
     except ValueError as e:
-        logging.error(f"Error while decoding event: {e}")
+        logging.error(f"Invalid payload: {str(e)}")
         return jsonify({'error': 'Invalid payload'}), 400
     except stripe.error.SignatureVerificationError as e:
-        logging.error(f"Signature verification failed: {e}")
+        logging.error(f"Invalid signature: {str(e)}")
         return jsonify({'error': 'Invalid signature'}), 400
 
+    # Handle the checkout.session.completed event
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_uid = session['metadata'].get('user_uid')
-
+        
         cart = Carts.query.filter_by(user_id=user_uid).first()
         if not cart:
-            logging.error("No cart found for user UID: %s", user_uid)
+            logging.error("Cart not found for user UID: {}".format(user_uid))
             return jsonify({'error': 'Cart not found'}), 404
 
-        # Extract shipping details from the session object
-        shipping = session.get('shipping', {}).get('address', {})
-        shipping_name = session.get('shipping', {}).get('name', '')
+        # Process order details
+        if isinstance(cart.custom_blend, str):
+            order_details = cart.custom_blend  # Assuming it's already a JSON string
+        else:
+            order_details = json.dumps(cart.custom_blend)  # Convert dict to JSON string if needed
+
+        # Extract shipping details
+        shipping = session.get('shipping', {})
+        shipping_address = shipping.get('address', {})
         
-        try:
-            new_order = Orders(
-                order_details=json.dumps(cart.custom_blend) if hasattr(cart, 'custom_blend') else 'No details available',
-                totalPrice=cart.totalPrice,
-                uid=user_uid,
-                shipping_name=shipping_name,
-                shipping_line1=shipping.get('line1', ''),
-                shipping_city=shipping.get('city', ''),
-                shipping_country=shipping.get('country', ''),
-                shipping_postal_code=shipping.get('postal_code', '')
-            )
-            db.session.add(new_order)
-            db.session.delete(cart)
-            db.session.commit()
-            logging.info("Order processed and cart cleared for user UID: %s", user_uid)
-            return jsonify({'message': 'Order processed and cart cleared'}), 200
-        except Exception as e:
-            db.session.rollback()
-            logging.error("Failed to process order for user UID: %s. Error: {e}", user_uid)
-            return jsonify({'error': str(e)}), 500
+        # Create a new order in the database
+        new_order = Orders(
+            order_details=order_details,
+            totalPrice=cart.totalPrice,
+            uid=user_uid,
+            shipping_name=shipping.get('name', ''),
+            shipping_line1=shipping_address.get('line1', ''),
+            shipping_city=shipping_address.get('city', ''),
+            shipping_country=shipping_address.get('country', ''),
+            shipping_postal_code=shipping_address.get('postal_code', '')
+        )
+        db.session.add(new_order)
+
+        # Clear the cart after processing
+        db.session.delete(cart)
+        db.session.commit()
+        logging.info("Order processed and cart cleared for user UID: {}".format(user_uid))
+        return jsonify({'message': 'Order processed and cart cleared'}), 200
 
     return jsonify({'message': 'Webhook received but not processed'}), 200
 ####################################################
