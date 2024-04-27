@@ -1,7 +1,6 @@
 from app import db
 from flask_marshmallow import Marshmallow
 from datetime import datetime, timezone
-from sqlalchemy.dialects.postgresql import JSON
 
 
 class User(db.Model):
@@ -18,7 +17,7 @@ class User(db.Model):
 
 class Carts(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    custom_blend = db.Column(JSON, nullable=False)
+    custom_blend = db.Column(db.String(10000), nullable=False)
     totalPrice = db.Column(db.Float(precision=2), nullable=False)
     createdAt = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     user_id = db.Column(db.String(100), db.ForeignKey('user.uid'), nullable=False)
