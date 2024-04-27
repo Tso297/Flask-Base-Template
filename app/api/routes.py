@@ -79,29 +79,22 @@ def stripe_webhook():
             logging.error("No cart found for user UID: %s", user_uid)
             return jsonify({'error': 'Cart not found'}), 404
 
-        # Ensure cart.custom_blend is properly formatted as a dictionary or list
-        if isinstance(cart.custom_blend, str):
-            cart_details = json.loads(cart.custom_blend)
-        else:
-            cart_details = cart.custom_blend
-
-        # Encode cart details as JSON string correctly without unnecessary escaping
-        order_details_json = json.dumps(cart_details)
-
+        # Extract shipping details from the session object
+        shipping = session.get('shipping', {}).get('address', {})
+        shipping_name = session.get('shipping', {}).get('name', '')
+        
         try:
             new_order = Orders(
-                order_details=order_details_json,
+                order_details=json.dumps(cart.custom_blend) if hasattr(cart, 'custom_blend') else 'No details available',
                 totalPrice=cart.totalPrice,
                 uid=user_uid,
-                shipping_name=session.get('shipping', {}).get('name', ''),
-                shipping_line1=session.get('shipping', {}).get('address', {}).get('line1', ''),
-                shipping_city=session.get('shipping', {}).get('address', {}).get('city', ''),
-                shipping_country=session.get('shipping', {}).get('address', {}).get('country', ''),
-                shipping_postal_code=session.get('shipping', {}).get('address', {}).get('postal_code', '')
+                shipping_name=shipping_name,
+                shipping_line1=shipping.get('line1', ''),
+                shipping_city=shipping.get('city', ''),
+                shipping_country=shipping.get('country', ''),
+                shipping_postal_code=shipping.get('postal_code', '')
             )
             db.session.add(new_order)
-
-            # Clear the cart
             db.session.delete(cart)
             db.session.commit()
             logging.info("Order processed and cart cleared for user UID: %s", user_uid)
